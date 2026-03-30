@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pdf-linker"
+version = "0.1.0"
+readme = "README.md"
+requires-python = ">=3.14"
+
+dependencies = [
+  "pdfplumber>=0.11,<0.12",
+  "PyMuPDF>=1.24,<1.27",
+]
+
+[project.optional-dependencies]
+ocr = [
+  "ocrmypdf>=16,<17",
+]
+dev = [
+  "pytest>=8,<9",
+  "reportlab>=4,<5",
+]
+
+[project.scripts]
+pdf-linker = "pdf_linker.cli:main"
+pdf-convert = "pdf_linker.convert:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
