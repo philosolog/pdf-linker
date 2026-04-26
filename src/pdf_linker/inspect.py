@@ -39,15 +39,20 @@ def _extract_heading_candidates(page: fitz.Page) -> tuple[list[str], list[list[f
             continue
         x0, y0, x1, y1, text = block[:5]
         bbox = [x0, y0, x1, y1]
-        if bbox[1] > height * 0.35:
+        if bbox[1] > height * 0.7:
             continue
         normalized_text = " ".join(str(text).split())
-        if not normalized_text:
+        if not normalized_text or len(normalized_text) > 180 or not any(char.isalpha() for char in normalized_text):
             continue
-        # Use a coarse size proxy from block height; enough for ranking large headings.
         average_size = max(0.0, bbox[3] - bbox[1])
-        if average_size >= 11.5 or len(normalized_text) <= 90:
-            candidates.append((average_size, normalized_text, bbox))
+        alpha_chars = [char for char in normalized_text if char.isalpha()]
+        uppercase_ratio = (
+            sum(1 for char in alpha_chars if char.isupper()) / len(alpha_chars)
+            if alpha_chars
+            else 0.0
+        )
+        if average_size >= 11.5 or uppercase_ratio >= 0.7 or len(normalized_text) <= 90:
+            candidates.append((average_size + (2.0 if uppercase_ratio >= 0.7 else 0.0), normalized_text, bbox))
     candidates.sort(key=lambda item: (-item[0], item[2][1]))
     seen: set[str] = set()
     headings: list[str] = []
@@ -59,7 +64,7 @@ def _extract_heading_candidates(page: fitz.Page) -> tuple[list[str], list[list[f
         seen.add(normalized)
         headings.append(text)
         boxes.append(bbox)
-        if len(headings) >= 6:
+        if len(headings) >= 12:
             break
     if headings:
         return headings, boxes

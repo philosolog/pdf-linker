@@ -65,19 +65,32 @@ def choose_toc_pages(detections: list[TocDetection]) -> list[int]:
     if max_score < 2.0:
         return []
     threshold = max(2.5, max_score * 0.45)
-    selected = [item.page_index for item in detections if item.score >= threshold]
+    selected = {item.page_index for item in detections if item.score >= threshold}
     if not selected:
         best = max(detections, key=lambda item: item.score)
         return [best.page_index]
-    selected.sort()
-    best_anchor = max(selected, key=lambda index: detections[index].score if index < len(detections) else 0.0)
-    cluster = [best_anchor]
-    for direction in (-1, 1):
-        cursor = best_anchor + direction
-        while 0 <= cursor < len(detections):
-            detection = detections[cursor]
-            if detection.score < 2.0 or abs(cursor - best_anchor) > 5:
-                break
-            cluster.append(cursor)
-            cursor += direction
+    selected_sorted = sorted(selected)
+    runs: list[list[int]] = []
+    for index in selected_sorted:
+        if not runs or index != runs[-1][-1] + 1:
+            runs.append([index])
+        else:
+            runs[-1].append(index)
+
+    def run_score(run: list[int]) -> tuple[float, int]:
+        return (sum(detections[index].score for index in run), len(run))
+
+    best_run = max(runs, key=run_score)
+
+    run_start = best_run[0]
+    run_end = best_run[-1]
+    cluster = list(best_run)
+    cursor = run_start - 1
+    while cursor >= 0 and detections[cursor].score >= 2.0:
+        cluster.append(cursor)
+        cursor -= 1
+    cursor = run_end + 1
+    while cursor < len(detections) and detections[cursor].score >= 2.0:
+        cluster.append(cursor)
+        cursor += 1
     return sorted(set(cluster))

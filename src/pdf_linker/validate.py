@@ -10,6 +10,21 @@ from pdf_linker.models import DestinationResult, InspectionReport, TocEntry
 
 
 TOKEN_RE = re.compile(r"[a-z0-9]+")
+STOP_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "by",
+    "for",
+    "in",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "v",
+    "vs",
+}
 
 
 def _normalize(text: str) -> str:
@@ -24,6 +39,25 @@ def _similarity(expected: str, actual: str) -> float:
     overlap = len(expected_tokens & actual_tokens) / len(expected_tokens)
     ratio = difflib.SequenceMatcher(None, _normalize(expected), _normalize(actual)).ratio()
     return round((overlap * 0.6) + (ratio * 0.4), 4)
+
+
+def _token_coverage(expected: str, actual: str) -> float:
+    expected_tokens = [token for token in TOKEN_RE.findall(expected.lower()) if token not in STOP_TOKENS]
+    actual_tokens = {token for token in TOKEN_RE.findall(actual.lower()) if token not in STOP_TOKENS}
+    if not expected_tokens or not actual_tokens:
+        return 0.0
+    matched = 0
+    for expected_token in expected_tokens:
+        if expected_token in actual_tokens:
+            matched += 1
+            continue
+        if len(expected_token) >= 6 and any(
+            difflib.SequenceMatcher(None, expected_token, actual_token).ratio() >= 0.86
+            for actual_token in actual_tokens
+            if abs(len(expected_token) - len(actual_token)) <= 2
+        ):
+            matched += 1
+    return round(matched / len(expected_tokens), 4)
 
 
 def _core_title(title: str) -> str:
@@ -77,6 +111,18 @@ def validate_destinations(
                         best_score = max(best_score, 0.88)
                         if best_heading is None:
                             best_heading = _core_title(entry.title)
+                    else:
+                        full_coverage = _token_coverage(entry.title, page_text)
+                        short_coverage = _token_coverage(_core_title(entry.title), page_text)
+                        coverage = max(full_coverage, short_coverage)
+                        if coverage >= 0.86:
+                            best_score = max(best_score, 0.82)
+                            if best_heading is None:
+                                best_heading = entry.title
+                        elif coverage >= 0.72 and candidate.mapping_score >= 0.88:
+                            best_score = max(best_score, 0.72)
+                            if best_heading is None:
+                                best_heading = entry.title
                     clone = type(candidate)(
                         page_index=page_index,
                         mapping_score=candidate.mapping_score - (0.12 if page_index != candidate.page_index else 0.0),
@@ -101,8 +147,9 @@ def validate_destinations(
                 runner_up = expanded_candidates[1]
                 runner_up_score = round(runner_up.mapping_score * 0.55 + runner_up.heading_score * 0.45, 4)
 
+            trusted_page_signal = best.mapping_score >= 0.88 and best.heading_score >= 0.7
             strong_signal = best.heading_score >= 0.7 and best.mapping_score >= 0.75
-            if top_score >= 0.75 and (top_score - runner_up_score >= 0.05 or strong_signal):
+            if (top_score >= 0.75 and (top_score - runner_up_score >= 0.05 or strong_signal)) or trusted_page_signal:
                 status = "resolved"
                 warning = None
             elif top_score >= 0.48:

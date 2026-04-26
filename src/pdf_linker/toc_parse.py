@@ -45,6 +45,18 @@ def _clean_title(text: str) -> str:
     return text.strip(" .\t")
 
 
+def _entry_key(entry: TocEntry) -> tuple[str, str]:
+    title = _clean_title(entry.title).lower()
+    title = re.sub(r"[^a-z0-9]+", " ", title)
+    return (" ".join(title.split()), entry.printed_page_label.strip().lower())
+
+
+def _entry_quality(entry: TocEntry) -> tuple[float, int, int]:
+    digit_count = sum(char.isdigit() for char in entry.printed_page_label)
+    alpha_count = sum(char.isalpha() for char in entry.printed_page_label)
+    return (entry.parse_confidence, digit_count - alpha_count, entry.toc_page_index)
+
+
 def _parse_numbering(title: str) -> str | None:
     match = NUMBERING_RE.match(title)
     return match.group("numbering") if match else None
@@ -103,6 +115,60 @@ def _page_label_to_number(label: str) -> tuple[int | None, str]:
     if value is not None:
         return value, "roman"
     return None, "unknown"
+
+
+def _repair_outlier_page_numbers(entries: list[TocEntry]) -> None:
+    for index, entry in enumerate(entries):
+        if entry.page_number_style != "arabic" or entry.printed_page_number is None:
+            continue
+        previous_number = next(
+            (
+                candidate.printed_page_number
+                for candidate in reversed(entries[:index])
+                if candidate.page_number_style == "arabic" and candidate.printed_page_number is not None
+            ),
+            None,
+        )
+        next_number = next(
+            (
+                candidate.printed_page_number
+                for candidate in entries[index + 1 :]
+                if candidate.page_number_style == "arabic" and candidate.printed_page_number is not None
+            ),
+            None,
+        )
+        if previous_number is None or next_number is None:
+            continue
+        current = entry.printed_page_number
+        if previous_number <= current <= next_number:
+            continue
+        if current < 100 or previous_number >= next_number:
+            continue
+
+        suffix = current % 100
+        hundreds = {previous_number // 100, next_number // 100}
+        replacements = [hundred * 100 + suffix for hundred in hundreds]
+        plausible = [value for value in replacements if previous_number <= value <= next_number]
+        if len(plausible) == 1:
+            repaired = plausible[0]
+            entry.printed_page_number = repaired
+            entry.printed_page_label = str(repaired)
+
+
+def _deduplicate_entries(entries: list[TocEntry]) -> list[TocEntry]:
+    deduplicated: list[TocEntry] = []
+    seen: dict[tuple[str, str], int] = {}
+    for entry in entries:
+        key = _entry_key(entry)
+        existing_index = seen.get(key)
+        if existing_index is None:
+            seen[key] = len(deduplicated)
+            deduplicated.append(entry)
+            continue
+        existing = deduplicated[existing_index]
+        if _entry_quality(entry) > _entry_quality(existing):
+            deduplicated[existing_index] = entry
+    return deduplicated
 
 
 def extract_toc_lines(pdf_path: str | Path, toc_pages: list[int]) -> list[TocLine]:
@@ -358,6 +424,8 @@ def extract_toc_entries(pdf_path: str | Path, toc_pages: list[int]) -> list[TocE
     for page_index in toc_pages:
         page_lines = [line for line in lines if line.toc_page_index == page_index]
         entries.extend(parse_toc_lines(page_lines))
+    _repair_outlier_page_numbers(entries)
+    entries = _deduplicate_entries(entries)
     for sequence, entry in enumerate(entries, start=1):
         entry.entry_id = f"toc-{sequence:04d}"
     return infer_hierarchy(entries)
