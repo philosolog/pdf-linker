@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from pdf_linker.cli import run_pipeline
@@ -58,6 +59,7 @@ def link_pdf_folder(
     auto_offset: bool = True,
     ocr: bool = False,
     verbose: bool = False,
+    workers: int = 1,
 ) -> list[PipelineReport]:
     raw_path = Path(raw_dir).expanduser().resolve()
     if not raw_path.is_dir():
@@ -74,9 +76,8 @@ def link_pdf_folder(
     iterator = raw_path.rglob(glob) if recursive else raw_path.glob(glob)
     pdf_paths = sorted(path.resolve() for path in iterator if path.is_file())
 
-    reports: list[PipelineReport] = []
-    for pdf_path in pdf_paths:
-        report = link_pdf(
+    def process(pdf_path: Path) -> PipelineReport:
+        return link_pdf(
             pdf_path,
             output_path=output_base / f"{pdf_path.stem}.linked.pdf",
             report_path=report_base / f"{pdf_path.stem}.report.json",
@@ -88,5 +89,9 @@ def link_pdf_folder(
             ocr=ocr,
             verbose=verbose,
         )
-        reports.append(report)
-    return reports
+
+    if workers <= 1 or len(pdf_paths) <= 1:
+        return [process(pdf_path) for pdf_path in pdf_paths]
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(process, pdf_paths))
