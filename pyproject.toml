@@ -18,7 +18,7 @@ ocr = [
   "ocrmypdf>=16,<17",
 ]
 dev = [
-  "pytest>=8,<9",
+  "pytest>=9.0.3,<10",
   "reportlab>=4,<5",
 ]
 
