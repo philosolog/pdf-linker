@@ -22,9 +22,9 @@ def _build_fixture(path: Path) -> None:
     doc.setFont("Helvetica-Bold", 20)
     doc.drawString(72, height - 96, "Contents")
     doc.setFont("Helvetica", 12)
-    doc.drawString(72, height - 132, "Chapter 1 Probability .................... 1")
-    doc.drawString(96, height - 150, "1.1 Sample Spaces ....................... 2")
-    doc.drawString(72, height - 168, "Chapter 2 Random Variables .............. 3")
+    doc.drawString(72, height - 132, "Chapter 1 Probability .................... 3")
+    doc.drawString(96, height - 150, "1.1 Sample Spaces ....................... 4")
+    doc.drawString(72, height - 168, "Chapter 2 Random Variables .............. 5")
     doc.showPage()
 
     doc.setFont("Helvetica-Bold", 18)
@@ -59,10 +59,7 @@ def test_pipeline_links_synthetic_pdf(tmp_path: Path):
         output=str(output_pdf),
         report=str(report_json),
         toc_pages=[2],
-        page_offset=None,
         auto_detect_toc=False,
-        auto_offset=True,
-        ocr=False,
         artifacts_dir=str(tmp_path / "artifacts"),
         verbose=False,
     )

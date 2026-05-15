@@ -7,6 +7,7 @@ from pathlib import Path
 from pdf_linker.cli import run_pipeline
 from pdf_linker.models import PipelineReport
 
+
 def link_pdf(
     pdf_path: str | Path,
     *,
@@ -14,10 +15,7 @@ def link_pdf(
     report_path: str | Path | None = None,
     artifacts_dir: str | Path | None = None,
     toc_pages: list[int] | None = None,
-    page_offset: int | None = None,
     auto_detect_toc: bool = True,
-    auto_offset: bool = True,
-    ocr: bool = False,
     verbose: bool = False,
 ) -> PipelineReport:
     input_path = Path(pdf_path).expanduser().resolve()
@@ -35,10 +33,7 @@ def link_pdf(
         output=str(output),
         report=str(report),
         toc_pages=toc_pages,
-        page_offset=page_offset,
         auto_detect_toc=auto_detect_toc,
-        auto_offset=auto_offset,
-        ocr=ocr,
         artifacts_dir=str(Path(artifacts_dir).expanduser().resolve()) if artifacts_dir is not None else None,
         verbose=verbose,
     )
@@ -54,10 +49,7 @@ def link_pdf_folder(
     glob: str = "*.pdf",
     recursive: bool = False,
     toc_pages: list[int] | None = None,
-    page_offset: int | None = None,
     auto_detect_toc: bool = True,
-    auto_offset: bool = True,
-    ocr: bool = False,
     verbose: bool = False,
     workers: int = 1,
 ) -> list[PipelineReport]:
@@ -83,10 +75,7 @@ def link_pdf_folder(
             report_path=report_base / f"{pdf_path.stem}.report.json",
             artifacts_dir=artifacts_base / pdf_path.stem,
             toc_pages=toc_pages,
-            page_offset=page_offset,
             auto_detect_toc=auto_detect_toc,
-            auto_offset=auto_offset,
-            ocr=ocr,
             verbose=verbose,
         )
 
