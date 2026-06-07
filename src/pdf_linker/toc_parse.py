@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from itertools import count
 from pathlib import Path
 
@@ -17,10 +18,27 @@ NUMBERING_RE = re.compile(
     r"^\s*(?P<numbering>(?:chapter|part|appendix)\s+[A-Z0-9]+|(?:\d+(?:\.\d+){0,5})|(?:[A-Z](?:\.\d+){0,5}))\b[.:]?\s*",
     re.IGNORECASE,
 )
-NUMBERING_ONLY_RE = re.compile(r"^(?:\d+(?:\.\d+){0,5}|[A-Z](?:\.\d+){0,5})$", re.IGNORECASE)
+NUMBERING_ONLY_RE = re.compile(
+    r"^(?P<numbering>\d+(?:\.\d+){0,5}|[A-Z](?:\.\d+){0,5})\.?$",
+    re.IGNORECASE,
+)
 PAGE_ONLY_RE = re.compile(r"^(?:\d+|(?:[ivxlcdm]{2,}|[ivx]))$")
 LEADER_ONLY_RE = re.compile(r"^(?:\.\s*){3,}$")
 LEADER_WITH_PAGE_RE = re.compile(r"^(?:\.\s*){3,}(?P<label>\d+|[ivxlcdm]+)$", re.IGNORECASE)
+CIRCUMFLEX_PREFIX_RE = re.compile(r"(?<=[A-Za-z])ˆ\s*([AaEeIiOoUu])")
+ASCII_ITO_CIRCUMFLEX_RE = re.compile(r"\bIt\^\s*([oO])\b")
+CIRCUMFLEX_VOWELS = {
+    "a": "â",
+    "e": "ê",
+    "i": "î",
+    "o": "ô",
+    "u": "û",
+    "A": "Â",
+    "E": "Ê",
+    "I": "Î",
+    "O": "Ô",
+    "U": "Û",
+}
 
 
 def roman_to_int(value: str) -> int | None:
@@ -39,7 +57,15 @@ def roman_to_int(value: str) -> int | None:
     return total
 
 
+def normalize_extracted_title_text(text: str) -> str:
+    text = unicodedata.normalize("NFC", text)
+    text = ASCII_ITO_CIRCUMFLEX_RE.sub(lambda match: f"It{CIRCUMFLEX_VOWELS[match.group(1)]}", text)
+    return CIRCUMFLEX_PREFIX_RE.sub(lambda match: CIRCUMFLEX_VOWELS[match.group(1)], text)
+
+
 def _clean_title(text: str) -> str:
+    text = normalize_extracted_title_text(text)
+    text = re.sub(r"(?<=[A-Za-z])-\s+(?=[A-Za-z])", "", text)
     text = re.sub(r"\s*\.{2,}\s*", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip(" .\t")
@@ -62,9 +88,16 @@ def _parse_numbering(title: str) -> str | None:
     return match.group("numbering") if match else None
 
 
+def _parse_numbering_only(text: str) -> str | None:
+    match = NUMBERING_ONLY_RE.match(text.strip())
+    return match.group("numbering") if match else None
+
+
 def _is_noise_line(text: str) -> bool:
     normalized = text.strip().lower()
-    return normalized in {"contents", "table of contents"} or normalized in {"i", "ii", "iii", "iv", "v", "vi", "vii", "viii"}
+    if normalized in {"contents", "table of contents"}:
+        return True
+    return bool(re.fullmatch(r"[ivxlcdm]+", normalized) and roman_to_int(normalized))
 
 
 def _has_meaningful_title(text: str) -> bool:
@@ -233,14 +266,16 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
             index += 2
             continue
 
-        if _has_meaningful_title(text) and next_line and NUMBERING_ONLY_RE.match(next_text) and next_next_leader:
+        next_numbering = _parse_numbering_only(next_text) if next_line else None
+
+        if _has_meaningful_title(text) and next_line and next_numbering and next_next_leader:
             entries.append(
                 _make_entry(
                     f"toc-{next(sequence):04d}",
                     [line, next_line, next_next_line],
                     f"{next_text} {text}",
                     next_next_leader.group("label"),
-                    numbering=next_text,
+                    numbering=next_numbering,
                 )
             )
             index += 3
@@ -250,7 +285,7 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
             _has_meaningful_title(text)
             and next_line
             and not TERMINAL_PAGE_RE.match(text)
-            and not NUMBERING_ONLY_RE.match(text)
+            and not _parse_numbering_only(text)
         ):
             wrapped_match = TERMINAL_PAGE_RE.match(next_text)
             if wrapped_match and _has_meaningful_title(wrapped_match.group("title")):
@@ -271,8 +306,8 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
             if (
                 numbering is None
                 and next_line
-                and NUMBERING_ONLY_RE.match(next_text)
-                and (not next_next_line or NUMBERING_ONLY_RE.match(next_next_text))
+                and next_numbering
+                and (not next_next_line or _parse_numbering_only(next_next_text))
             ):
                 entries.append(
                     _make_entry(
@@ -280,7 +315,7 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
                         [line, next_line],
                         f"{next_text} {direct_match.group('title')}",
                         direct_match.group("label"),
-                        numbering=next_text,
+                        numbering=next_numbering,
                     )
                 )
                 index += 2
@@ -296,7 +331,8 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
             index += 1
             continue
 
-        if NUMBERING_ONLY_RE.match(text):
+        numbering_only = _parse_numbering_only(text)
+        if numbering_only:
             title_lines: list[TocLine] = [line]
             title_parts: list[str] = [text]
             cursor = index + 1
@@ -312,7 +348,7 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
                             title_lines + [candidate],
                             f"{text} {direct_candidate.group('title')}",
                             direct_candidate.group("label"),
-                            numbering=text,
+                            numbering=numbering_only,
                         )
                     )
                     index = cursor + 1
@@ -326,7 +362,7 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
                             title_lines + [candidate],
                             " ".join(title_parts),
                             leader_with_page.group("label"),
-                            numbering=text,
+                            numbering=numbering_only,
                         )
                     )
                     index = cursor + 1
@@ -340,7 +376,7 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
                                 title_lines + [candidate],
                                 " ".join(title_parts),
                                 candidate_text,
-                                numbering=text,
+                                numbering=numbering_only,
                             )
                         )
                         index = cursor + 1
@@ -351,7 +387,7 @@ def parse_toc_lines(lines: list[TocLine]) -> list[TocEntry]:
                     title_lines.append(candidate)
                     cursor += 1
                     continue
-                if NUMBERING_ONLY_RE.match(candidate_text):
+                if _parse_numbering_only(candidate_text):
                     break
                 title_lines.append(candidate)
                 title_parts.append(candidate_text)
@@ -401,10 +437,11 @@ def infer_hierarchy(entries: list[TocEntry], *, indent_tolerance: float = 10.0) 
     for entry in entries:
         number_depth = 0
         if entry.numbering:
-            if chapter_like.match(entry.numbering):
+            numbering = entry.numbering.rstrip(".")
+            if chapter_like.match(numbering):
                 number_depth = 1
             else:
-                number_depth = entry.numbering.count(".") + 1
+                number_depth = numbering.count(".") + 1
         indent_depth = next(
             (index + 1 for index, value in enumerate(indent_levels) if abs(entry.indent - value) <= indent_tolerance),
             1,

@@ -37,3 +37,69 @@ def test_parse_toc_lines_handles_split_numbering_and_leader_pages():
     assert entries[0].printed_page_label == "196"
     assert entries[1].title == "4.4 Doob's Inequality, Convergence in L p , p > 1"
     assert entries[1].printed_page_label == "235"
+
+
+def test_parse_toc_lines_handles_split_chapter_number_and_wrapped_title():
+    lines = [
+        TocLine(text="4.", bbox=[72, 100, 82, 112], indent=72, toc_page_index=4, font_size=12),
+        TocLine(
+            text="The Ito Formula and the Martingale Representation Theo-",
+            bbox=[96, 100, 320, 112],
+            indent=96,
+            toc_page_index=4,
+            font_size=12,
+        ),
+        TocLine(
+            text="rem . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .",
+            bbox=[96, 116, 320, 128],
+            indent=96,
+            toc_page_index=4,
+            font_size=12,
+        ),
+        TocLine(text="43", bbox=[330, 116, 345, 128], indent=330, toc_page_index=4, font_size=12),
+        TocLine(text="4.1", bbox=[96, 140, 116, 152], indent=96, toc_page_index=4, font_size=12),
+        TocLine(
+            text="The 1-dimensional Ito formula . . . . . . . . . . . . . . . .",
+            bbox=[120, 140, 320, 152],
+            indent=120,
+            toc_page_index=4,
+            font_size=12,
+        ),
+        TocLine(text="43", bbox=[330, 140, 345, 152], indent=330, toc_page_index=4, font_size=12),
+    ]
+
+    entries = infer_hierarchy(parse_toc_lines(lines))
+
+    assert [entry.title for entry in entries] == [
+        "4. The Ito Formula and the Martingale Representation Theorem",
+        "4.1 The 1-dimensional Ito formula",
+    ]
+    assert [entry.level for entry in entries] == [1, 2]
+
+
+def test_parse_toc_lines_ignores_roman_running_header():
+    lines = [
+        TocLine(text="XIX", bbox=[360, 70, 380, 82], indent=360, toc_page_index=4, font_size=10),
+        TocLine(
+            text="12. Application to Mathematical Finance . . . . . . . . . . . . . . . . . 249",
+            bbox=[72, 100, 350, 112],
+            indent=72,
+            toc_page_index=4,
+            font_size=12,
+        ),
+    ]
+
+    entries = parse_toc_lines(lines)
+
+    assert entries[0].title == "12. Application to Mathematical Finance"
+
+
+def test_parse_toc_lines_normalizes_extracted_circumflex_titles():
+    lines = [
+        TocLine(text="3. Itˆo Integrals ........ 21", bbox=[72, 100, 320, 114], indent=72, toc_page_index=4, font_size=12),
+        TocLine(text="4. It^o Formula .......... 43", bbox=[72, 120, 320, 134], indent=72, toc_page_index=4, font_size=12),
+    ]
+
+    entries = parse_toc_lines(lines)
+
+    assert [entry.title for entry in entries] == ["3. Itô Integrals", "4. Itô Formula"]

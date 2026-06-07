@@ -12,7 +12,7 @@ PAGE_END_RE = re.compile(r"(?:\b\d+\b|\b[ivxlcdm]+\b)\s*$", re.IGNORECASE)
 NUMBERING_RE = re.compile(r"^\s*(?:chapter|part|appendix|\d+(?:\.\d+){0,3})\b", re.IGNORECASE)
 
 
-def detect_toc_pages(pdf_path: str | Path, *, front_window: int = 40) -> list[TocDetection]:
+def detect_toc_pages(pdf_path: str | Path, *, front_window: int = 80) -> list[TocDetection]:
     detections: list[TocDetection] = []
     with fitz.open(str(pdf_path)) as document:
         limit = min(document.page_count, front_window)
