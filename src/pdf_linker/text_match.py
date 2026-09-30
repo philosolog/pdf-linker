@@ -228,7 +228,7 @@ def _minimal_inspection(
     existing_outline_count = len(document.get_toc(simple=False))
     warnings: list[str] = []
     if existing_outline_count:
-        warnings.append("Input PDF already contains outlines; output outline will be replaced.")
+        warnings.append("Input PDF already contains an outline.")
     return InspectionReport(
         input_path=str(path),
         page_count=document.page_count,

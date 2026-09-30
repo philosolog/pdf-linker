@@ -7,11 +7,11 @@ import sys
 from pathlib import Path
 
 from pdf_linker.models import PipelineReport, dataclass_to_dict
+from pdf_linker.outline_detect import extract_document_outline, read_existing_outline
 from pdf_linker.text_match import map_toc_entries_by_printed_page_numbers
 from pdf_linker.toc_detect import choose_toc_pages, detect_toc_pages
 from pdf_linker.toc_parse import extract_toc_entries
 from pdf_linker.write_pdf import write_links_and_bookmarks
-
 
 LOGGER = logging.getLogger("pdf_linker")
 
@@ -51,7 +51,54 @@ def run_pipeline(args: argparse.Namespace) -> PipelineReport:
     else:
         toc_pages = choose_toc_pages(toc_detections) if (args.auto_detect_toc or not args.toc_pages) else []
     if not toc_pages:
-        raise SystemExit("Unable to determine TOC pages. Supply --toc-pages or use --auto-detect-toc.")
+        inspection, _ = map_toc_entries_by_printed_page_numbers(input_path, [], [])
+        entries, validated = read_existing_outline(input_path)
+        warnings = [
+            warning
+            for warning in inspection.warnings
+            if warning != "Input PDF already contains an outline."
+        ]
+        if entries:
+            _, written_bookmarks = write_links_and_bookmarks(
+                input_path,
+                output_path,
+                entries,
+                validated,
+                add_page_links=False,
+            )
+            warnings.append(
+                f"No explicit TOC pages found; normalized existing outline with {written_bookmarks} entries."
+            )
+        else:
+            entries, validated = extract_document_outline(input_path)
+            if not entries:
+                raise SystemExit("Unable to find TOC pages or document section headings.")
+            _, written_bookmarks = write_links_and_bookmarks(
+                input_path,
+                output_path,
+                entries,
+                validated,
+                add_page_links=False,
+            )
+            warnings.append(
+                f"No explicit TOC pages found; created an outline from {written_bookmarks} document headings."
+            )
+        report = PipelineReport(
+            input_path=str(input_path),
+            output_path=str(output_path),
+            report_path=str(report_path),
+            toc_pages=[],
+            inspection=inspection,
+            toc_detections=toc_detections,
+            entries=entries,
+            destinations=validated,
+            warnings=warnings,
+        )
+        _json_dump(artifacts_dir / "toc_entries.json", entries)
+        _json_dump(artifacts_dir / "inspect.json", inspection)
+        _json_dump(artifacts_dir / "destinations.json", validated)
+        _json_dump(report_path, report)
+        return report
 
     entries = extract_toc_entries(input_path, toc_pages)
     _json_dump(artifacts_dir / "toc_entries.json", entries)

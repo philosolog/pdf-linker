@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import fitz
 
@@ -12,10 +13,13 @@ def write_links_and_bookmarks(
     output_path: str | Path,
     entries: list[TocEntry],
     destinations: list[DestinationResult],
+    *,
+    add_page_links: bool = True,
+    replace_outline: bool = True,
 ) -> tuple[int, int]:
     destination_by_entry = {item.entry_id: item for item in destinations}
     written_links = 0
-    outline_rows: list[list[int | str]] = []
+    outline_rows: list[list[object]] = []
 
     outline_level = 0
     with fitz.open(str(input_path)) as document:
@@ -23,18 +27,19 @@ def write_links_and_bookmarks(
             destination = destination_by_entry.get(entry.entry_id)
             if destination is None or destination.status != "resolved" or destination.selected_page_index is None:
                 continue
-            toc_page = document[entry.toc_page_index]
-            rect = fitz.Rect(*entry.bbox)
-            destination_point = fitz.Point(0, destination.destination_y or 72)
-            toc_page.insert_link(
-                {
-                    "kind": fitz.LINK_GOTO,
-                    "from": rect,
-                    "page": destination.selected_page_index,
-                    "to": destination_point,
-                }
-            )
-            written_links += 1
+            if add_page_links:
+                toc_page = document[entry.toc_page_index]
+                rect = fitz.Rect(*entry.bbox)
+                destination_point = fitz.Point(0, destination.destination_y or 72)
+                toc_page.insert_link(
+                    {
+                        "kind": fitz.LINK_GOTO,
+                        "from": rect,
+                        "page": destination.selected_page_index,
+                        "to": destination_point,
+                    }
+                )
+                written_links += 1
             normalized_level = entry.level
             if not outline_rows:
                 normalized_level = 1
@@ -43,11 +48,30 @@ def write_links_and_bookmarks(
             elif normalized_level < 1:
                 normalized_level = 1
             outline_level = normalized_level
-            outline_rows.append([normalized_level, entry.title, destination.selected_page_index + 1])
+            outline_rows.append(
+                [
+                    normalized_level,
+                    entry.title,
+                    destination.selected_page_index + 1,
+                    {
+                        "kind": fitz.LINK_GOTO,
+                        "page": destination.selected_page_index,
+                        "to": fitz.Point(0, destination.destination_y or 72.0),
+                        "zoom": 0.0,
+                    },
+                ]
+            )
 
-        if outline_rows:
+        if replace_outline and outline_rows:
             document.set_toc(outline_rows)
+        elif not replace_outline:
+            outline_rows = document.get_toc()
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
-        document.save(str(output), garbage=4, deflate=True)
+        temporary_output = output.with_name(f".{output.name}.{uuid4().hex}.tmp")
+        try:
+            document.save(str(temporary_output), garbage=4, deflate=True)
+            temporary_output.replace(output)
+        finally:
+            temporary_output.unlink(missing_ok=True)
     return written_links, len(outline_rows)

@@ -76,3 +76,72 @@ def test_pipeline_links_synthetic_pdf(tmp_path: Path):
         assert len(toc) >= 2
         links = document[1].get_links()
         assert links
+
+
+def test_pipeline_preserves_existing_outline_when_pdf_has_no_toc_page(tmp_path: Path):
+    input_pdf = tmp_path / "outlined-paper.pdf"
+    output_pdf = tmp_path / "outlined-paper.linked.pdf"
+    report_json = tmp_path / "outlined-paper.report.json"
+    document = fitz.open()
+    document.new_page().insert_text((72, 72), "Paper title", fontsize=18)
+    document.new_page().insert_text((72, 72), "1 Introduction", fontsize=15)
+    document.set_toc([[1, "Paper title", 1], [2, "Introduction", 2]])
+    document.save(input_pdf)
+    document.close()
+
+    report = run_pipeline(
+        Namespace(
+            input=str(input_pdf),
+            output=str(output_pdf),
+            report=str(report_json),
+            toc_pages=None,
+            auto_detect_toc=True,
+            artifacts_dir=str(tmp_path / "outlined-artifacts"),
+            verbose=False,
+        )
+    )
+
+    assert report.toc_pages == []
+    assert len(report.entries) == 1
+    with fitz.open(output_pdf) as linked:
+        assert linked.get_toc() == [[1, "Introduction", 2]]
+
+
+def test_pipeline_builds_outline_from_paper_headings(tmp_path: Path):
+    input_pdf = tmp_path / "paper.pdf"
+    output_pdf = tmp_path / "paper.linked.pdf"
+    report_json = tmp_path / "paper.report.json"
+    document = fitz.open()
+    page = document.new_page(width=400, height=400)
+    page.insert_text((72, 50), "Paper title", fontsize=18)
+    page.insert_text((72, 90), "1 Introduction", fontsize=16)
+    page.insert_text((72, 130), "Body text " * 8, fontsize=10)
+    page = document.new_page(width=400, height=400)
+    page.insert_text((72, 72), "1.1 Prior work", fontsize=13)
+    page.insert_text((72, 110), "More body text " * 8, fontsize=10)
+    page = document.new_page(width=400, height=400)
+    page.insert_text((72, 72), "2 Results", fontsize=16)
+    page.insert_text((72, 110), "Final body text " * 8, fontsize=10)
+    document.save(input_pdf)
+    document.close()
+
+    report = run_pipeline(
+        Namespace(
+            input=str(input_pdf),
+            output=str(output_pdf),
+            report=str(report_json),
+            toc_pages=None,
+            auto_detect_toc=True,
+            artifacts_dir=str(tmp_path / "paper-artifacts"),
+            verbose=False,
+        )
+    )
+
+    assert [entry.title for entry in report.entries] == ["1 Introduction", "1.1 Prior work", "2 Results"]
+    with fitz.open(output_pdf) as linked:
+        assert linked.get_toc() == [
+            [1, "1 Introduction", 1],
+            [2, "1.1 Prior work", 2],
+            [1, "2 Results", 3],
+        ]
+        assert sum(len(page.get_links()) for page in linked) == 0

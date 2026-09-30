@@ -23,3 +23,16 @@ def test_detect_toc_pages_finds_later_front_matter_toc(tmp_path: Path):
     detections = detect_toc_pages(pdf_path)
 
     assert choose_toc_pages(detections) == [49]
+
+
+def test_detect_toc_pages_rejects_publisher_contents_boilerplate(tmp_path: Path):
+    pdf_path = tmp_path / "journal-paper.pdf"
+    document = fitz.open()
+    page = document.new_page(width=400, height=400)
+    page.insert_text((72, 72), "Contents lists available at ScienceDirect", fontsize=12)
+    for row in range(10):
+        page.insert_text((72, 110 + row * 18), f"Equation {row} .......... {row + 3}", fontsize=12)
+    document.save(pdf_path)
+    document.close()
+
+    assert choose_toc_pages(detect_toc_pages(pdf_path)) == []
