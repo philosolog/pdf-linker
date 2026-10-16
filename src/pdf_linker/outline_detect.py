@@ -42,11 +42,17 @@ def _page_rows(page: fitz.Page) -> list[dict[str, object]]:
             spans = [span for span in line.get("spans", []) if span.get("text", "").strip()]
             if not spans:
                 continue
+            bold_prefix: list[str] = []
+            for span in spans:
+                if not int(span.get("flags", 0)) & fitz.TEXT_FONT_BOLD:
+                    break
+                bold_prefix.append(span.get("text", ""))
             fragments.append(
                 {
                     "text": " ".join(span.get("text", "").strip() for span in spans),
                     "bbox": [float(value) for value in line.get("bbox", spans[0].get("bbox"))],
                     "size": max(float(span.get("size", 0.0)) for span in spans),
+                    "bold_prefix": " ".join("".join(bold_prefix).split()),
                 }
             )
 
@@ -169,11 +175,15 @@ def extract_document_outline(pdf_path: str | Path) -> tuple[list[TocEntry], list
                 raw_text = re.sub(r"\s+", " ", str(row["text"])).strip()
                 numbered = NUMBERED_HEADING_RE.match(raw_text)
                 special = SPECIAL_HEADING_RE.match(raw_text)
-                if not numbered and not special:
-                    continue
-                if float(row["size"]) < body_size + 0.8:
-                    continue
-                title, bbox = _merge_wrapped_heading(rows, index)
+                if (numbered or special) and float(row["size"]) >= body_size + 0.8:
+                    title, bbox = _merge_wrapped_heading(rows, index)
+                else:
+                    # Run-in heading at body size, e.g. bold "2.1. Rank-One Tensors." followed by body text.
+                    title = str(row["bold_prefix"]).rstrip(".").strip()
+                    numbered = NUMBERED_HEADING_RE.match(title)
+                    if not numbered and not SPECIAL_HEADING_RE.match(title):
+                        continue
+                    bbox = list(row["bbox"])
                 numbering = numbered.group("numbering") if numbered else None
                 entry_id = f"outline-{len(entries) + 1:04d}"
                 entries.append(

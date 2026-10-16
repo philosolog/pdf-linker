@@ -9,6 +9,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 from pdf_linker.cli import run_pipeline
+from pdf_linker.outline_detect import extract_document_outline
 
 
 def _build_fixture(path: Path) -> None:
@@ -145,3 +146,28 @@ def test_pipeline_builds_outline_from_paper_headings(tmp_path: Path):
             [1, "2 Results", 3],
         ]
         assert sum(len(page.get_links()) for page in linked) == 0
+
+
+def test_outline_detects_run_in_bold_headings(tmp_path: Path):
+    input_pdf = tmp_path / "journal.pdf"
+    document = fitz.open()
+    page = document.new_page(width=400, height=400)
+    page.insert_htmlbox(
+        fitz.Rect(72, 60, 380, 300),
+        "<p><b>1. Introduction.</b> A tensor is an array.</p>"
+        "<p>1. Not a heading, plain numbered body text.</p>"
+        "<p><b>2.1. Rank-One Tensors.</b> Body text follows.</p>"
+        "<p><b>Fig. 2.1</b> A caption.</p>"
+        "<p><b>Acknowledgments.</b> Thanks.</p>",
+        css="* { font-size: 10px; }",
+    )
+    document.save(input_pdf)
+    document.close()
+
+    entries, _ = extract_document_outline(input_pdf)
+
+    assert [(entry.level, entry.title) for entry in entries] == [
+        (1, "1. Introduction"),
+        (2, "2.1. Rank-One Tensors"),
+        (1, "Acknowledgments"),
+    ]
