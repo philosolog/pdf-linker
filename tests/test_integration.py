@@ -171,3 +171,26 @@ def test_outline_detects_run_in_bold_headings(tmp_path: Path):
         (2, "2.1. Rank-One Tensors"),
         (1, "Acknowledgments"),
     ]
+
+
+def test_outline_includes_styled_methods_and_back_matter(tmp_path: Path):
+    input_pdf = tmp_path / "methods.pdf"
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((70, 80), "1. Series methods.", fontname="hebo")
+        page.insert_text((70, 100), "Method 1.", fontname="hebo")
+        page.insert_text((135, 100), "Taylor series.", fontname="hebo")
+        page.insert_text((225, 100), "The series converges.")
+        page.insert_text((70, 130), "Method 1. In the preceding example we used it.")
+        page.insert_text((70, 160), "Appendix A. Error analysis.", fontname="hebo")
+        page.insert_text((70, 190), "10 x 10", fontname="hebo")
+        page.insert_text((70, 220), "REFERENCES", fontsize=8)
+        document.save(input_pdf)
+
+    entries, _ = extract_document_outline(input_pdf)
+    assert [(entry.level, entry.title) for entry in entries] == [
+        (1, "1. Series methods"),
+        (2, "Method 1. Taylor series"),
+        (1, "Appendix A. Error analysis"),
+        (1, "REFERENCES"),
+    ]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter
+from itertools import takewhile
 from pathlib import Path
 
 import fitz
@@ -16,6 +18,9 @@ SPECIAL_HEADING_RE = re.compile(
     r"^(?:appendix(?:\s+[A-Z0-9]+)?|acknowledg(?:e)?ments?|references|bibliography)$",
     re.IGNORECASE,
 )
+METHOD_HEADING_RE = re.compile(r"^Method \d+\.\s+\S", re.IGNORECASE)
+APPENDIX_TITLE_RE = re.compile(r"^Appendix [A-Z0-9]+[.:]\s+\S", re.IGNORECASE)
+AXIS_SCALE_RE = re.compile(r"^\d+\s*[x×]\s*\d+$", re.IGNORECASE)
 FILE_TITLE_RE = re.compile(r"\.(?:dvi|pdf|ps)$", re.IGNORECASE)
 
 
@@ -47,8 +52,14 @@ def _page_rows(page: fitz.Page) -> list[dict[str, object]]:
                 if not int(span.get("flags", 0)) & fitz.TEXT_FONT_BOLD:
                     break
                 bold_prefix.append(span.get("text", ""))
+            first_font = spans[0]["font"]
+            same_font = list(takewhile(lambda span: span["font"] == first_font, spans))
             fragments.append(
                 {
+                    "baseline": float(spans[0]["origin"][1]),
+                    "font": first_font,
+                    "font_prefix": "".join(span["text"] for span in same_font).strip(),
+                    "single_font": len(same_font) == len(spans),
                     "text": " ".join(span.get("text", "").strip() for span in spans),
                     "bbox": [float(value) for value in line.get("bbox", spans[0].get("bbox"))],
                     "size": max(float(span.get("size", 0.0)) for span in spans),
@@ -56,14 +67,19 @@ def _page_rows(page: fitz.Page) -> list[dict[str, object]]:
                 }
             )
 
-    fragments.sort(key=lambda item: (round(float(item["bbox"][1]), 1), float(item["bbox"][0])))
+    fragments.sort(key=lambda item: (round(float(item["baseline"]), 1), float(item["bbox"][0])))
     rows: list[dict[str, object]] = []
     for fragment in fragments:
         bbox = fragment["bbox"]
-        same_baseline = rows and abs(float(rows[-1]["bbox"][1]) - float(bbox[1])) <= 2.0
+        same_baseline = rows and abs(float(rows[-1]["baseline"]) - float(fragment["baseline"])) <= 2.0
         same_size = rows and abs(float(rows[-1]["size"]) - float(fragment["size"])) <= 0.6
         if same_baseline and same_size:
             row = rows[-1]
+            if row["single_font"] and row["font"] == fragment["font"]:
+                row["font_prefix"] = f"{row['font_prefix']} {fragment['font_prefix']}"
+                row["single_font"] = fragment["single_font"]
+            else:
+                row["single_font"] = False
             row["text"] = f"{row['text']} {fragment['text']}"
             old_bbox = row["bbox"]
             row["bbox"] = [
@@ -175,22 +191,34 @@ def extract_document_outline(pdf_path: str | Path) -> tuple[list[TocEntry], list
                 raw_text = re.sub(r"\s+", " ", str(row["text"])).strip()
                 numbered = NUMBERED_HEADING_RE.match(raw_text)
                 special = SPECIAL_HEADING_RE.match(raw_text)
-                if (numbered or special) and float(row["size"]) >= body_size + 0.8:
+                prefix = str(row["font_prefix"]).rstrip(".")
+                method = METHOD_HEADING_RE.match(prefix) and (
+                    bool(row["bold_prefix"]) or re.search(r"cmcsc|smallcaps?", str(row["font"]), re.I)
+                )
+                if AXIS_SCALE_RE.fullmatch(raw_text):
+                    continue
+                if method:
+                    title, bbox = prefix, list(row["bbox"])
+                elif special and raw_text.isupper():
+                    title, bbox = raw_text, list(row["bbox"])
+                elif (numbered or special) and float(row["size"]) >= body_size + 0.8:
                     title, bbox = _merge_wrapped_heading(rows, index)
                 else:
                     # Run-in heading at body size, e.g. bold "2.1. Rank-One Tensors." followed by body text.
                     title = str(row["bold_prefix"]).rstrip(".").strip()
                     numbered = NUMBERED_HEADING_RE.match(title)
-                    if not numbered and not SPECIAL_HEADING_RE.match(title):
+                    if not (numbered or SPECIAL_HEADING_RE.match(title) or APPENDIX_TITLE_RE.match(title)):
                         continue
                     bbox = list(row["bbox"])
+                # Older TeX fonts encode an acute accent before its base letter.
+                title = unicodedata.normalize("NFC", re.sub(r"´([A-Za-z])", r"\1" + "\u0301", title))
                 numbering = numbered.group("numbering") if numbered else None
                 entry_id = f"outline-{len(entries) + 1:04d}"
                 entries.append(
                     TocEntry(
                         entry_id=entry_id,
                         title=title,
-                        level=_heading_level(numbering),
+                        level=2 if method and entries else _heading_level(numbering),
                         printed_page_label=str(page_index + 1),
                         printed_page_number=page_index + 1,
                         page_number_style="arabic",
